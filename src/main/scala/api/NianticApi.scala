@@ -1,6 +1,6 @@
 package api
 
-import Niantic.AuthSession
+import NianticApi.AuthSession
 import POGOProtos.Inventory.Item.ItemId.ItemId
 import POGOProtos.Networking.Envelopes.AuthTicket.AuthTicket
 import POGOProtos.Networking.Envelopes.RequestEnvelope.RequestEnvelope
@@ -37,19 +37,19 @@ import akka.util.ByteString
 import com.trueaccord.scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.{ExecutionContext, Future}
-
-import Niantic._
+import NianticApi._
+import api.GoogleProvider.ProviderSession
 /**
   * Created on 2016-07-28.
   */
-class Niantic(session: AuthSession, location: Location)
-             (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext) {
+class NianticApi(session: AuthSession, location: Location)
+                (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext) {
 
 
   import NianticResponse._
   import NianticRequests._
 
-  def updateLocation(loc: Location) = new Niantic(session, loc)
+  def updateLocation(loc: Location) = new NianticApi(session, loc)
 
   private def createRequestEnvelope(request: Request) =
     requestWithTicket(session.authTicket)
@@ -103,7 +103,7 @@ class Niantic(session: AuthSession, location: Location)
 
 }
 
-object Niantic {
+object NianticApi {
 
   import NianticRequests._
 
@@ -137,7 +137,7 @@ object Niantic {
   }
 
   // Retrieve new session details with provided token
-  def authenticate(provider: String, token: String, location: Location)
+  def authenticate(providerSession: ProviderSession, location: Location)
                   (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext): Future[AuthSession] = {
 
     // send intial batch of requests (these do not get a response)
@@ -147,7 +147,7 @@ object Niantic {
     val checkAwardedBadges = Request(RequestType.CHECK_AWARDED_BADGES)
     val downloadSettings = Request(RequestType.DOWNLOAD_SETTINGS, encodeMessage(DownloadSettingsMessage(settingsHash)))
 
-    val req = requestWithToken(provider, token)
+    val req = requestWithToken(providerSession.provider, providerSession.token)
       .withLatitude(location.lat)
       .withLongitude(location.lng)
       .withRequests(
