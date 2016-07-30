@@ -1,6 +1,7 @@
 package api
 
 import akka.actor.ActorSystem
+import akka.http.scaladsl.HttpExt
 import akka.stream.ActorMaterializer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -18,10 +19,11 @@ object GoogleProvider {
   case class ProviderSession(provider: String, token: String)
 
   def login(username: String, password: String)
-           (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext): Future[ProviderSession] = {
+           (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext): Future[ProviderSession] = {
+    val client = new GoogleAuthClient()
     for {
-      googleAuthRes <- GoogleAuthClient.login(username, password, LoginAndroidId)
-      session <- GoogleAuthClient.oauth(username, googleAuthRes.masterToken, LoginAndroidId, LoginService, LoginApp, LoginClientSignature)
+      googleAuthRes <- client.login(username, password, LoginAndroidId)
+      session <- client.oauth(username, googleAuthRes.masterToken, LoginAndroidId, LoginService, LoginApp, LoginClientSignature)
     } yield ProviderSession("google", session.token)
   }
 }

@@ -29,7 +29,7 @@ import POGOProtos.Networking.Responses.GetMapObjectsResponse.GetMapObjectsRespon
 import POGOProtos.Networking.Responses.GetPlayerResponse.GetPlayerResponse
 import POGOProtos.Networking.Responses.PlayerUpdateResponse.PlayerUpdateResponse
 import akka.actor.ActorSystem
-import akka.http.scaladsl.Http
+import akka.http.scaladsl.{Http, HttpExt}
 import akka.http.scaladsl.model.{HttpEntity, StatusCodes, _}
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{Flow, Sink, Source}
@@ -39,11 +39,14 @@ import com.trueaccord.scalapb.{GeneratedMessage, GeneratedMessageCompanion, Mess
 import scala.concurrent.{ExecutionContext, Future}
 import NianticApi._
 import api.GoogleProvider.ProviderSession
+import com.google.common.geometry.{S2CellId, S2LatLng}
+
+import scala.collection.mutable.ListBuffer
 /**
   * Created on 2016-07-28.
   */
 class NianticApi(session: AuthSession, location: Location)
-                (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext) {
+                (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext) {
 
 
   import NianticResponse._
@@ -59,7 +62,7 @@ class NianticApi(session: AuthSession, location: Location)
 
   private def send[A <: GeneratedMessage with Message[A]](responseParser: GeneratedMessageCompanion[A])(request: Request): Future[A] = {
     val req = createRequestEnvelope(request)
-    sendRequest(session.host, session.path, req).map(handleResponse(_, responseParser))
+    sendRequest(session.uri, req).map(handleResponse(_, responseParser))
   }
 
   def getPlayer = send(GetPlayerResponse)(Request(RequestType.GET_PLAYER))
@@ -101,6 +104,22 @@ class NianticApi(session: AuthSession, location: Location)
     send(GetMapObjectsResponse)(Request(RequestType.GET_MAP_OBJECTS,
       encodeMessage(GetMapObjectsMessage(cellIds, sinceTimestamps, location.lat, location.lng))))
 
+  def getCellIds(location: Location, radius: Int) = {
+    val cellId = S2CellId.fromLatLng(S2LatLng.fromDegrees(location.lat, location.lng))
+    val parentCell = cellId.parent(15)
+    val previousCell = parentCell.prev()
+    val nextCell = parentCell.next()
+
+    val (cellIds, _, _) = (1 to radius).foldLeft((Vector(parentCell.id()), previousCell, nextCell)) {
+      (acc, _) => acc match {
+        case (ids, previous, next) =>
+          (previous.id() +: ids :+ next.id(), previous.prev(), next.next())
+      }
+    }
+
+    cellIds
+  }
+
 }
 
 object NianticApi {
@@ -108,10 +127,9 @@ object NianticApi {
   import NianticRequests._
 
   case class Location(lat: Double, lng: Double)
-  case class AuthSession(host: String, path: String, authTicket: AuthTicket)
+  case class AuthSession(uri: String, authTicket: AuthTicket)
 
-  val EntryHost = "pgorelease.nianticlabs.com"
-  val EntryPath = "/plfe/rpc"
+  val EntryUri = "https://pgorelease.nianticlabs.com/plfe/rpc"
 
   private val requestEnvelope = {
 
@@ -138,7 +156,7 @@ object NianticApi {
 
   // Retrieve new session details with provided token
   def authenticate(providerSession: ProviderSession, location: Location)
-                  (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext): Future[AuthSession] = {
+                  (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext): Future[AuthSession] = {
 
     // send intial batch of requests (these do not get a response)
     val getPlayer = Request(RequestType.GET_PLAYER)
@@ -155,35 +173,28 @@ object NianticApi {
       )
 
     // extract new api URL from response and the auth ticket
-    sendRequest(EntryHost, EntryPath, req)
+    sendRequest(EntryUri, req)
       .map(r => {
-        val List(domain, path) = r.apiUrl.split("/", 2).toList
-        AuthSession(domain, s"/$path/rpc", r.authTicket.get)
+        AuthSession(s"https://${r.apiUrl}/rpc", r.authTicket.get)
       })
   }
 
-  def sendRequest(host: String, path: String, request: RequestEnvelope)
-                 (implicit system: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext): Future[ResponseEnvelope] = {
+  def sendRequest(uri: String, request: RequestEnvelope)
+                 (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext): Future[ResponseEnvelope] = {
 
     val requestHeaders = List(
       headers.`User-Agent`("Niantic App"),
       headers.Accept(List(MediaRanges.`*/*`))
     )
 
-    val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] =
-      Http().outgoingConnectionHttps(host)
-
-    Source
-      .single(HttpRequest(HttpMethods.POST, uri = path, entity = HttpEntity(request.toByteArray), headers = requestHeaders))
-      .via(connectionFlow)
-      .runWith(Sink.head)
-      .flatMap({
-        case HttpResponse(StatusCodes.OK, headers, entity, _) =>
-          entity.dataBytes.runFold(ByteString(""))(_ ++ _)
-        case HttpResponse(code, _, _, _) =>
-          Future.failed(new Exception("Server responded with error"))
-      })
-      .map(encodedByteString => ResponseEnvelope.parseFrom(encodedByteString.toArray))
+    http.singleRequest(HttpRequest(HttpMethods.POST, uri = uri, entity = HttpEntity(request.toByteArray), headers = requestHeaders))
+    .flatMap({
+      case HttpResponse(StatusCodes.OK, headers, entity, _) =>
+        entity.dataBytes.runFold(ByteString(""))(_ ++ _)
+      case HttpResponse(code, _, _, _) =>
+        Future.failed(new Exception("Server responded with error"))
+    })
+    .map(encodedByteString => ResponseEnvelope.parseFrom(encodedByteString.toArray))
   }
 }
 

@@ -18,6 +18,7 @@ libraryDependencies ++= {
   val scalaTestV  = "2.2.6"
 
   Seq(
+    "org.isuper"              %  "s2-geometry-library-java"             % "0.0.1",
     "com.typesafe.akka"       %% "akka-actor"                           % akkaV,
     "com.typesafe.akka"       %% "akka-stream"                          % akkaV,
     "com.typesafe.akka"       %% "akka-http-core"                       % akkaV,
