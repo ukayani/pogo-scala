@@ -16,7 +16,7 @@ object GoogleProvider {
   val LoginApp = "com.nianticlabs.pokemongo"
   val LoginClientSignature = "321187995bc7cdc2b5fc91b11a96e2baa8602c62"
 
-  case class ProviderSession(provider: String, token: String)
+  case class ProviderSession(provider: String, username:String, token: String)
 
   def login(username: String, password: String)
            (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext): Future[ProviderSession] = {
@@ -24,6 +24,6 @@ object GoogleProvider {
     for {
       googleAuthRes <- client.login(username, password, LoginAndroidId)
       session <- client.oauth(username, googleAuthRes.masterToken, LoginAndroidId, LoginService, LoginApp, LoginClientSignature)
-    } yield ProviderSession("google", session.token)
+    } yield ProviderSession("google", username, session.token)
   }
 }

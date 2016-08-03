@@ -1,11 +1,20 @@
 package utils
 
-import api.NianticApi.Location
+import com.google.common.geometry.{S2CellId, S2LatLng}
 
 /**
   * Created on 2016-08-02.
   */
 object Geo {
+
+  case class Location(lat: Double, lng: Double) {
+    def toRadians:(Double, Double) = (math.toRadians(lat), math.toRadians(lng))
+  }
+
+  object Location {
+    def fromRadians(lat: Double, lng: Double): Location = Location(math.toDegrees(lat), math.toDegrees(lng))
+  }
+
 
   val EarthRadiusInKm = 6378.1
 
@@ -18,6 +27,23 @@ object Geo {
 
   type Kilometers = Double
   type Radians = Double
+
+  def getCellIds(location: Location, radius: Int) = {
+    val cellId = S2CellId.fromLatLng(S2LatLng.fromDegrees(location.lat, location.lng))
+    val parentCell = cellId.parent(15)
+    val previousCell = parentCell.prev()
+    val nextCell = parentCell.next()
+
+    val (cellIds, _, _) = (1 to radius).foldLeft((Vector(parentCell.id()), previousCell, nextCell)) {
+      (acc, _) => acc match {
+        case (ids, previous, next) =>
+          (previous.id() +: ids :+ next.id(), previous.prev(), next.next())
+      }
+    }
+
+    cellIds
+  }
+
 
   def calculateCoordinate(origin: Location, distance: Kilometers, bearing: Radians): Location = {
     val (lat, lng) = origin.toRadians
@@ -32,7 +58,7 @@ object Geo {
     Location.fromRadians(newLat, newLng)
   }
 
-  def generateHexagonRing(origin: Location, radius: Double, numRings: Int): Seq[Location] = {
+  def generateHexagonRing(origin: Location, radius: Double, numRings: Int): List[Location] = {
 
     type Transformation = (Location, Kilometers, Kilometers) => Location
 

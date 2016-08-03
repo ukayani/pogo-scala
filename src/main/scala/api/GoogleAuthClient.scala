@@ -16,7 +16,7 @@ class GoogleAuthClient(implicit http: HttpExt, mat: ActorMaterializer, ec: Execu
   val UserAgent = "Dalvik/2.1.0 (Linux; U; Android 5.1.1; Andromax I56D2G Build/LMY47V"
 
   case class GoogleLoginResponse(androidId: String, masterToken: String)
-  case class GoogleSession(token: String)
+  case class GoogleSession(email:String, token: String)
 
   def login(email: String, password: String, androidId: String): Future[GoogleLoginResponse] = {
 
@@ -56,7 +56,10 @@ class GoogleAuthClient(implicit http: HttpExt, mat: ActorMaterializer, ec: Execu
       "sdk_version" -> "17"
     )
 
-    makeRequest(data).map(res => GoogleSession(res("Auth")))
+    makeRequest(data).map(res => {
+      println(res)
+      GoogleSession(email, res("Auth"))
+    })
   }
 
   private def makeRequest(data: Map[String, String]): Future[Map[String, String]] = {

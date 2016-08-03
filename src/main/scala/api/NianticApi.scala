@@ -36,16 +36,14 @@ import com.trueaccord.scalapb.{GeneratedMessage, GeneratedMessageCompanion, Mess
 
 import scala.concurrent.{ExecutionContext, Future}
 import NianticApi._
-import akka.actor.Kill
 import api.GoogleProvider.ProviderSession
-import com.google.common.geometry.{S2CellId, S2LatLng}
+import utils.Geo.Location
 
 /**
   * Created on 2016-07-28.
   */
 class NianticApi(session: AuthSession)
                 (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext) {
-
 
   import NianticResponse._
   import NianticRequests._
@@ -101,22 +99,6 @@ class NianticApi(session: AuthSession)
     send(GetMapObjectsResponse)(Request(RequestType.GET_MAP_OBJECTS,
       encodeMessage(GetMapObjectsMessage(cellIds, sinceTimestamps, loc.lat, loc.lng))), loc)
 
-  def getCellIds(location: Location, radius: Int) = {
-    val cellId = S2CellId.fromLatLng(S2LatLng.fromDegrees(location.lat, location.lng))
-    val parentCell = cellId.parent(15)
-    val previousCell = parentCell.prev()
-    val nextCell = parentCell.next()
-
-    val (cellIds, _, _) = (1 to radius).foldLeft((Vector(parentCell.id()), previousCell, nextCell)) {
-      (acc, _) => acc match {
-        case (ids, previous, next) =>
-          (previous.id() +: ids :+ next.id(), previous.prev(), next.next())
-      }
-    }
-
-    cellIds
-  }
-
 }
 
 object NianticApi {
@@ -125,15 +107,7 @@ object NianticApi {
 
   import NianticRequests._
 
-  case class Location(lat: Double, lng: Double) {
-    def toRadians:(Double, Double) = (math.toRadians(lat), math.toRadians(lng))
-  }
-
-  object Location {
-    def fromRadians(lat: Double, lng: Double): Location = Location(math.toDegrees(lat), math.toDegrees(lng))
-  }
-
-  case class AuthSession(uri: String, authTicket: AuthTicket)
+  case class AuthSession(uri: String, username: String, authTicket: AuthTicket)
 
   val EntryUri = "https://pgorelease.nianticlabs.com/plfe/rpc"
 
@@ -181,7 +155,7 @@ object NianticApi {
     // extract new api URL from response and the auth ticket
     sendRequest(EntryUri, req)
       .map(r => {
-        AuthSession(s"https://${r.apiUrl}/rpc", r.authTicket.get)
+        AuthSession(s"https://${r.apiUrl}/rpc", providerSession.username, r.authTicket.get)
       })
   }
 

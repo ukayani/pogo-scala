@@ -2,51 +2,68 @@ package actors
 
 import java.util.concurrent.TimeUnit
 
-import actors.Player.{GetPokemon, GetPokemonResult}
-import akka.actor.{Actor, ActorLogging, Cancellable, Props, Scheduler}
+import actors.Coordinator.{Authenticate, RequestLocation, Search}
+import actors.Player.{GetPokemon, GetPokemonResult, SearchEnded, SearchInitiated}
+import akka.actor.{Actor, ActorLogging, Props, Stash}
 import akka.http.scaladsl.Http
 import akka.stream.ActorMaterializer
 import api.{GoogleProvider, NianticApi}
-import api.NianticApi.{AuthSession, Location}
+import api.NianticApi.AuthSession
 import akka.pattern.pipe
+import utils.Geo
+import utils.Geo.Location
 
-import scala.concurrent.duration._
 
 /**
   * Created on 2016-07-31.
   */
-class Coordinator(username: String, password: String, location: Location) extends Actor with ActorLogging {
+class Coordinator extends Actor with ActorLogging with Stash {
 
   implicit val system = context.system
   implicit val mat = ActorMaterializer()
   implicit val ec = system.dispatcher
   implicit val http = Http()
-  var timer: Option[Cancellable] = None
-
-  override def preStart(): Unit = {
-    log.info("Authenticating")
-    authenticate()
-  }
+  var players = List.empty[String]
+  var searchQueue = List.empty[Location]
 
   def receive: Receive = {
     case auth:AuthSession =>
       log.info("Got Session")
       log.info("Session: {}", auth)
-      val player = context.actorOf(Player.props(auth, location), "player")
+      players = auth.username :: players
+      context.actorOf(Player.props(auth), auth.username)
+      unstashAll()
+      context.become(authenticated)
 
-      timer.map(c => c.cancel())
+    case Authenticate(username, password, location) => {
+      log.info("Authenticating")
+      authenticate(username, password, location)
+    }
+    case _ => stash()
+  }
 
-      timer = Some(system.scheduler.schedule(
-        0 seconds,
-        10 seconds,
-        player,
-        GetPokemon(location)))
+  def authenticated: Receive = {
+    case Search(location) => {
+      searchQueue = Geo.generateHexagonRing(location, NianticApi.HeartBeatRadiusInKm, 4)
+      context.children.foreach(c => c ! SearchInitiated)
+    }
+
+    case RequestLocation => {
+      if (searchQueue.isEmpty) {
+        sender() ! SearchEnded
+      } else {
+        val location = searchQueue.head
+        log.info("Dequeing location {}", location)
+        searchQueue = searchQueue.drop(1)
+        sender() ! GetPokemon(location)
+      }
+    }
 
     case GetPokemonResult(pokemons) =>
       pokemons.foreach(p => log.info("Found {} at {} hidden at: {}ms", p.id, p.location, despawnTime(p.timeTillHiddenMs)))
   }
 
-  def authenticate() = {
+  def authenticate(username: String, password: String, location: Location) = {
     val authSession = for {
       providerSession <- GoogleProvider.login(username, password)
       authSession <- NianticApi.authenticate(providerSession, location)
@@ -63,8 +80,10 @@ class Coordinator(username: String, password: String, location: Location) extend
 }
 
 object Coordinator {
-  def props(username: String, password: String, location: Location) = Props(new Coordinator(username, password, location))
+  def props = Props(new Coordinator)
 
   case class Search(location: Location)
+  case class Authenticate(username: String, password: String, location: Location)
+  case object RequestLocation
 
 }
