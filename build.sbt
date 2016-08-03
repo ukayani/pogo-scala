@@ -25,6 +25,7 @@ libraryDependencies ++= {
     "com.typesafe.akka"       %% "akka-http-experimental"               % akkaV,
     "com.typesafe.akka"       %% "akka-http-spray-json-experimental"    % akkaV,
     "com.typesafe.akka"       %% "akka-http-testkit"                    % akkaV,
+    "com.typesafe"            % "config"                                % "1.3.0",
     "org.scalatest"           %% "scalatest"                            % scalaTestV % "test"
   )
 }

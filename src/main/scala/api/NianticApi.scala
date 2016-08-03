@@ -28,81 +28,78 @@ import POGOProtos.Networking.Responses.GetInventoryResponse.GetInventoryResponse
 import POGOProtos.Networking.Responses.GetMapObjectsResponse.GetMapObjectsResponse
 import POGOProtos.Networking.Responses.GetPlayerResponse.GetPlayerResponse
 import POGOProtos.Networking.Responses.PlayerUpdateResponse.PlayerUpdateResponse
-import akka.actor.ActorSystem
-import akka.http.scaladsl.{Http, HttpExt}
+import akka.http.scaladsl.HttpExt
 import akka.http.scaladsl.model.{HttpEntity, StatusCodes, _}
 import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.util.ByteString
 import com.trueaccord.scalapb.{GeneratedMessage, GeneratedMessageCompanion, Message}
 
 import scala.concurrent.{ExecutionContext, Future}
 import NianticApi._
+import akka.actor.Kill
 import api.GoogleProvider.ProviderSession
 import com.google.common.geometry.{S2CellId, S2LatLng}
 
-import scala.collection.mutable.ListBuffer
 /**
   * Created on 2016-07-28.
   */
-class NianticApi(session: AuthSession, location: Location)
+class NianticApi(session: AuthSession)
                 (implicit http: HttpExt, mat: ActorMaterializer, ec: ExecutionContext) {
 
 
   import NianticResponse._
   import NianticRequests._
 
-  def updateLocation(loc: Location) = new NianticApi(session, loc)
-
-  private def createRequestEnvelope(request: Request) =
+  private def createRequestEnvelope(request: Request, location: Location) =
     requestWithTicket(session.authTicket)
       .withLatitude(location.lat)
       .withLongitude(location.lng)
       .withRequests(List(request))
 
-  private def send[A <: GeneratedMessage with Message[A]](responseParser: GeneratedMessageCompanion[A])(request: Request): Future[A] = {
-    val req = createRequestEnvelope(request)
+  private def send[A <: GeneratedMessage with Message[A]](responseParser: GeneratedMessageCompanion[A])
+                                                         (request: Request, location: Location): Future[A] = {
+    val req = createRequestEnvelope(request, location)
     sendRequest(session.uri, req).map(handleResponse(_, responseParser))
   }
 
-  def getPlayer = send(GetPlayerResponse)(Request(RequestType.GET_PLAYER))
-  def getHatchedEggs = send(GetHatchedEggsResponse)(Request(RequestType.GET_HATCHED_EGGS))
-  def getInventory = send(GetInventoryResponse)(Request(RequestType.GET_INVENTORY))
-  def checkAwardedBadges = send(CheckAwardedBadgesResponse)(Request(RequestType.CHECK_AWARDED_BADGES))
-  def downloadSettings = send(DownloadSettingsResponse)(Request(RequestType.DOWNLOAD_SETTINGS,
-    encodeMessage(DownloadSettingsMessage(settingsHash))))
+  def getPlayer(loc: Location) = send(GetPlayerResponse)(Request(RequestType.GET_PLAYER), loc)
+  def getHatchedEggs(loc: Location) = send(GetHatchedEggsResponse)(Request(RequestType.GET_HATCHED_EGGS), loc)
+  def getInventory(loc: Location) = send(GetInventoryResponse)(Request(RequestType.GET_INVENTORY), loc)
+  def checkAwardedBadges(loc: Location) = send(CheckAwardedBadgesResponse)(Request(RequestType.CHECK_AWARDED_BADGES), loc)
+  def downloadSettings(loc: Location) = send(DownloadSettingsResponse)(Request(RequestType.DOWNLOAD_SETTINGS,
+    encodeMessage(DownloadSettingsMessage(settingsHash))), loc)
 
-  def playerUpdate() =
+  def playerUpdate(loc: Location) =
     send(PlayerUpdateResponse)(Request(RequestType.PLAYER_UPDATE,
-      encodeMessage(PlayerUpdateMessage(location.lat, location.lng))))
+      encodeMessage(PlayerUpdateMessage(loc.lat, loc.lng))), loc)
 
-  def getInventory(lastTimestamp: Long = 0) =
-    send(GetInventoryResponse)(Request(RequestType.GET_INVENTORY, encodeMessage(GetInventoryMessage(lastTimestamp))))
+  def getInventory(loc: Location)(lastTimestamp: Long = 0) =
+    send(GetInventoryResponse)(Request(RequestType.GET_INVENTORY, encodeMessage(GetInventoryMessage(lastTimestamp))), loc)
 
-  def fortSearch(fortId: String, fortLocation: Location) =
+  def fortSearch(loc: Location)(fortId: String, fortLocation: Location) =
     send(FortSearchResponse)(Request(RequestType.FORT_SEARCH,
-      encodeMessage(FortSearchMessage(fortId, location.lat, location.lng, fortLocation.lat,
-        fortLocation.lng))))
+      encodeMessage(FortSearchMessage(fortId, loc.lat, loc.lng, fortLocation.lat,
+        fortLocation.lng))), loc)
 
-  def encounter(encounterId: Long, spawnPointId: String) =
+  def encounter(loc: Location)(encounterId: Long, spawnPointId: String) =
     send(EncounterResponse)(Request(RequestType.ENCOUNTER, encodeMessage(EncounterMessage(encounterId, spawnPointId,
-      location.lat, location.lng))))
+      loc.lat, loc.lng))), loc)
 
 
-  def catchPokemon(encounterId: Long, pokeballItemId: ItemId, normalizedReticleSize: Double, spawnPointId: String,
+  def catchPokemon(loc: Location)(encounterId: Long, pokeballItemId: ItemId, normalizedReticleSize: Double, spawnPointId: String,
                    hitPokemon: Boolean, spinModifier: Double, normalizedHitPosition: Double) =
     send(CatchPokemonResponse)(Request(RequestType.CATCH_POKEMON,
       encodeMessage(CatchPokemonMessage(encounterId, pokeballItemId,
-        normalizedReticleSize, spawnPointId, hitPokemon, spinModifier, normalizedHitPosition))))
+        normalizedReticleSize, spawnPointId, hitPokemon, spinModifier, normalizedHitPosition))), loc)
 
 
-  def fortDetails(fortId: String, fortLocation: Location) =
+  def fortDetails(loc: Location)(fortId: String, fortLocation: Location) =
     send(FortDetailsResponse)(Request(RequestType.FORT_DETAILS,
-      encodeMessage(FortDetailsMessage(fortId, fortLocation.lat, fortLocation.lng))))
+      encodeMessage(FortDetailsMessage(fortId, fortLocation.lat, fortLocation.lng))), loc)
 
-  def getMapObjects(cellIds: Seq[Long], sinceTimestamps: Seq[Long]) =
+  def getMapObjects(loc: Location)(cellIds: Seq[Long], sinceTimestamps: Seq[Long]) =
     send(GetMapObjectsResponse)(Request(RequestType.GET_MAP_OBJECTS,
-      encodeMessage(GetMapObjectsMessage(cellIds, sinceTimestamps, location.lat, location.lng))))
+      encodeMessage(GetMapObjectsMessage(cellIds, sinceTimestamps, loc.lat, loc.lng))), loc)
 
   def getCellIds(location: Location, radius: Int) = {
     val cellId = S2CellId.fromLatLng(S2LatLng.fromDegrees(location.lat, location.lng))
@@ -124,9 +121,18 @@ class NianticApi(session: AuthSession, location: Location)
 
 object NianticApi {
 
+  val HeartBeatRadiusInKm = 0.07
+
   import NianticRequests._
 
-  case class Location(lat: Double, lng: Double)
+  case class Location(lat: Double, lng: Double) {
+    def toRadians:(Double, Double) = (math.toRadians(lat), math.toRadians(lng))
+  }
+
+  object Location {
+    def fromRadians(lat: Double, lng: Double): Location = Location(math.toDegrees(lat), math.toDegrees(lng))
+  }
+
   case class AuthSession(uri: String, authTicket: AuthTicket)
 
   val EntryUri = "https://pgorelease.nianticlabs.com/plfe/rpc"
